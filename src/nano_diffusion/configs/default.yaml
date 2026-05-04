@@ -1,0 +1,24 @@
+project:
+  name: nano-diffusion-code
+  seed: 42
+
+model:
+  vocab_size: 50000
+  dim: 768
+  layers: 12
+  heads: 12
+  max_seq_len: 2048
+
+diffusion:
+  timesteps: 64
+  schedule: cosine
+
+training:
+  batch_size: 16
+  learning_rate: 3.0e-4
+  warmup_steps: 1000
+  total_steps: 100000
+
+data:
+  train_manifest: data/train_manifest.jsonl
+  val_manifest: data/val_manifest.jsonl
