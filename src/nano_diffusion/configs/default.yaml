@@ -3,22 +3,28 @@ project:
   seed: 42
 
 model:
-  vocab_size: 50000
-  dim: 768
-  layers: 12
-  heads: 12
-  max_seq_len: 2048
+  vocab_size: 260
+  dim: 128
+  layers: 4
+  heads: 4
+  max_seq_len: 256
+  dropout: 0.1
 
 diffusion:
-  timesteps: 64
+  timesteps: 32
   schedule: cosine
 
 training:
-  batch_size: 16
+  batch_size: 8
   learning_rate: 3.0e-4
-  warmup_steps: 1000
-  total_steps: 100000
+  weight_decay: 0.01
+  grad_clip: 1.0
+  total_steps: 200
+  eval_interval: 50
+  save_interval: 100
+  output_dir: runs/nano-diffusion-byte
+  device: auto
 
 data:
-  train_manifest: data/train_manifest.jsonl
-  val_manifest: data/val_manifest.jsonl
+  train_manifest: data/processed/train.jsonl
+  val_manifest: data/processed/val.jsonl

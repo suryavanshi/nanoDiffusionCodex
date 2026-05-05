@@ -37,11 +37,12 @@ Build a **nano-scale diffusion model for code generation/editing** with fast ite
 - Add data pipeline skeleton and tokenizer tooling.
 - Create baseline training/evaluation CLI entrypoints.
 
-### Phase 1 — MVP Diffusion Training Loop (Weeks 2–4)
-- Implement noising + denoising training objective.
-- Implement minimal Transformer denoiser with timestep embeddings.
-- Train on small curated code corpus subset.
-- Validate end-to-end train/eval/infer loop.
+### Phase 1 — MVP Diffusion Training Loop (Current)
+- Use deterministic byte-level tokenization first; this avoids tokenizer training and keeps Modal/local preprocessing identical.
+- Implement masked discrete diffusion: sample a timestep, mask code bytes according to a linear/cosine schedule, and train the model to reconstruct the original tokens at masked positions.
+- Implement a small bidirectional Transformer denoiser with token, position, and timestep embeddings.
+- Prepare a tiny Hugging Face code slice via streaming download into reproducible JSONL token manifests.
+- Validate end-to-end train/eval/infer loop locally or on Modal before scaling model size.
 
 ### Phase 2 — Quality + Stability (Weeks 5–8)
 - Add improved schedules, loss weighting, and curriculum.

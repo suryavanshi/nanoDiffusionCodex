@@ -14,7 +14,7 @@ nanoDiffusionCodex is designed as a clean starting point: lightweight structure,
 
 ## 📌 Current status
 
-This repository is currently in an early scaffold phase. The structure is in place, while most implementation modules are intentionally minimal placeholders.
+This repository now has a first real MVP path: a byte-level tokenizer, masked discrete diffusion objective, tiny Transformer denoiser, Hugging Face dataset preparation script, training/eval/inference entrypoints, and a Modal smoke-training script.
 
 If you are extending this repo, start with:
 
@@ -27,9 +27,17 @@ If you are extending this repo, start with:
 From the repository root:
 
 ```bash
+python -m pip install -r requirements.txt
+python scripts/prepare_hf_dataset.py --max-samples 512 --val-samples 64
 python scripts/train.py
-python scripts/eval.py
-python scripts/infer.py
+python scripts/eval.py --checkpoint runs/nano-diffusion-byte/best.pt
+python scripts/infer.py --checkpoint runs/nano-diffusion-byte/best.pt --prompt "def add(a, b):\n    "
+```
+
+To run the small remote smoke test on Modal:
+
+```bash
+/Users/kb/Library/Python/3.9/bin/modal run scripts/modal_train.py --total-steps 20
 ```
 
 ## 🗂️ Repository layout

@@ -1,0 +1,4 @@
+torch>=2.2
+datasets>=2.18
+PyYAML>=6.0
+tqdm>=4.66

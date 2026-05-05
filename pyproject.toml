@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nano-diffusion-codex"
+version = "0.1.0"
+description = "Tiny discrete diffusion experiments for code tokens."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.2",
+    "datasets>=2.18",
+    "PyYAML>=6.0",
+    "tqdm>=4.66",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
