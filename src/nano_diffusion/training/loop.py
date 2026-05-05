@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,13 @@ def masked_ce_loss(logits: torch.Tensor, targets: torch.Tensor, mask_positions: 
     return F.cross_entropy(logits[mask_positions], targets[mask_positions])
 
 
+def loss_to_perplexity(loss: float) -> float:
+    try:
+        return float(math.exp(min(loss, 50.0)))
+    except OverflowError:
+        return float("inf")
+
+
 @torch.no_grad()
 def evaluate(
     model: torch.nn.Module,
@@ -65,8 +73,21 @@ def evaluate(
     device: torch.device,
     max_batches: int = 8,
 ) -> float:
+    return evaluate_metrics(model, loader, diffusion, device, max_batches=max_batches)["loss"]
+
+
+@torch.no_grad()
+def evaluate_metrics(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    diffusion: MaskingDiffusion,
+    device: torch.device,
+    max_batches: int = 8,
+) -> dict[str, float]:
     model.eval()
-    losses: list[float] = []
+    total_nll = 0.0
+    masked_tokens = 0
+    batches = 0
     for index, batch in enumerate(loader):
         if index >= max_batches:
             break
@@ -76,9 +97,18 @@ def evaluate(
         noisy, mask_positions = diffusion.q_sample(input_ids, attention_mask, t)
         logits = model(noisy, t, attention_mask)
         loss = masked_ce_loss(logits, input_ids, mask_positions)
-        losses.append(float(loss.item()))
+        batch_masked_tokens = int(mask_positions.sum().item())
+        total_nll += float(loss.item()) * batch_masked_tokens
+        masked_tokens += batch_masked_tokens
+        batches += 1
     model.train()
-    return sum(losses) / max(1, len(losses))
+    loss = total_nll / max(1, masked_tokens)
+    return {
+        "loss": loss,
+        "perplexity": loss_to_perplexity(loss),
+        "masked_tokens": float(masked_tokens),
+        "batches": float(batches),
+    }
 
 
 def train(config: dict[str, Any]) -> dict[str, Any]:
@@ -154,8 +184,11 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
 
         record = {"step": step, "train_loss": float(loss.item())}
         if step % eval_interval == 0 or step == total_steps:
-            val_loss = evaluate(model, val_loader, diffusion, device)
+            val_metrics = evaluate_metrics(model, val_loader, diffusion, device)
+            val_loss = val_metrics["loss"]
             record["val_loss"] = val_loss
+            record["val_perplexity"] = val_metrics["perplexity"]
+            record["val_masked_tokens"] = val_metrics["masked_tokens"]
             if val_loss < best_val:
                 best_val = val_loss
                 save_checkpoint(output_dir / "best.pt", model, optimizer, config, step, val_loss)
@@ -169,6 +202,7 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
         "output_dir": str(output_dir),
         "steps": step,
         "best_val_loss": best_val,
+        "best_val_perplexity": loss_to_perplexity(best_val),
         "device": str(device),
         "parameters": sum(p.numel() for p in model.parameters()),
     }

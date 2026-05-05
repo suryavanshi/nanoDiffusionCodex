@@ -40,6 +40,15 @@ To run the small remote smoke test on Modal:
 /Users/kb/Library/Python/3.9/bin/modal run scripts/modal_train.py --total-steps 20
 ```
 
+For Colab training, open [notebooks/colab_train.ipynb](notebooks/colab_train.ipynb). The data prep script supports two built-in Hugging Face presets:
+
+```bash
+python scripts/prepare_hf_dataset.py --preset codeparrot-clean
+python scripts/prepare_hf_dataset.py --preset codesearchnet-python
+```
+
+Baseline Modal performance reports live in [reports/](reports/).
+
 ## 🗂️ Repository layout
 
 ```text

@@ -14,10 +14,33 @@ from nano_diffusion.data.manifest import extract_text, write_token_manifest
 from nano_diffusion.data.tokenizer import ByteTokenizer
 
 
+DATASET_PRESETS = {
+    "codeparrot-clean": {
+        "dataset": "codeparrot/codeparrot-clean",
+        "config": None,
+        "split": "train",
+        "text_field": "content",
+    },
+    "codesearchnet-python": {
+        "dataset": "code_search_net",
+        "config": "python",
+        "split": "train",
+        "text_field": "whole_func_string",
+    },
+}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", default="codeparrot/codeparrot-clean", help="Hugging Face dataset name")
-    parser.add_argument("--split", default="train", help="Dataset split")
+    parser.add_argument(
+        "--preset",
+        choices=sorted(DATASET_PRESETS),
+        default="codeparrot-clean",
+        help="Known Hugging Face dataset preset. Use explicit flags to override.",
+    )
+    parser.add_argument("--dataset", default=None, help="Hugging Face dataset name")
+    parser.add_argument("--dataset-config", default=None, help="Optional Hugging Face dataset config/subset")
+    parser.add_argument("--split", default=None, help="Dataset split")
     parser.add_argument("--text-field", default=None, help="Optional text/code field name")
     parser.add_argument("--max-samples", type=int, default=512, help="Total usable examples to write")
     parser.add_argument("--val-samples", type=int, default=64, help="Examples reserved for validation")
@@ -26,6 +49,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="data/processed", help="Output directory")
     parser.add_argument("--streaming", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
+
+
+def resolve_dataset_args(args: argparse.Namespace) -> tuple[str, str | None, str, str | None]:
+    preset = DATASET_PRESETS[args.preset]
+    dataset = args.dataset or preset["dataset"]
+    dataset_config = args.dataset_config if args.dataset_config is not None else preset["config"]
+    split = args.split or preset["split"]
+    text_field = args.text_field if args.text_field is not None else preset["text_field"]
+    return dataset, dataset_config, split, text_field
 
 
 def limited_rows(dataset_iter, max_rows: int, text_field: str | None, min_chars: int):
@@ -47,9 +79,14 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit("Install datasets to download from Hugging Face: pip install datasets") from exc
 
+    dataset, dataset_config, split, text_field = resolve_dataset_args(args)
     total = args.max_samples + args.val_samples
-    raw = load_dataset(args.dataset, split=args.split, streaming=args.streaming)
-    rows = list(limited_rows(iter(raw), total, args.text_field, args.min_chars))
+    load_kwargs = {"split": split, "streaming": args.streaming}
+    if dataset_config:
+        raw = load_dataset(dataset, dataset_config, **load_kwargs)
+    else:
+        raw = load_dataset(dataset, **load_kwargs)
+    rows = list(limited_rows(iter(raw), total, text_field, args.min_chars))
     if len(rows) < total:
         print(f"[prepare] warning: requested {total} rows, found {len(rows)} usable rows")
 
@@ -65,7 +102,7 @@ def main() -> None:
         train_path,
         tokenizer,
         args.max_seq_len,
-        text_field=args.text_field,
+        text_field=text_field,
         min_chars=args.min_chars,
     )
     val_count = write_token_manifest(
@@ -73,11 +110,11 @@ def main() -> None:
         val_path,
         tokenizer,
         args.max_seq_len,
-        text_field=args.text_field,
+        text_field=text_field,
         min_chars=args.min_chars,
     )
 
-    print(f"[prepare] dataset={args.dataset} split={args.split}")
+    print(f"[prepare] preset={args.preset} dataset={dataset} config={dataset_config} split={split} text_field={text_field}")
     print(f"[prepare] wrote train={train_count} -> {train_path}")
     print(f"[prepare] wrote val={val_count} -> {val_path}")
 

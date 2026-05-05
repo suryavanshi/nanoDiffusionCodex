@@ -49,6 +49,33 @@ After adding BOS/EOS protection in the noising process, a shorter current-code s
 - Best validation loss: 27.17182159423828
 - Training loss fell from about 56.3 to about 35.0.
 
+Larger baseline run requested after the initial implementation:
+
+```bash
+/Users/kb/Library/Python/3.9/bin/modal run scripts/modal_train.py --total-steps 100 --max-samples 512 --val-samples 64 --max-seq-len 128
+```
+
+- Modal app URL: https://modal.com/apps/suryavanshi/main/ap-99tfJulwbdlX4hHCfQtmkj
+- Dataset: `codeparrot/codeparrot-clean`
+- Train examples: 512
+- Validation examples: 64
+- Steps: 100
+- Best validation loss: 4.291656715487971
+- Masked-token perplexity: 73.08745336917994
+
+Second dataset smoke:
+
+```bash
+/Users/kb/Library/Python/3.9/bin/modal run scripts/modal_train.py --dataset-name code_search_net --dataset-config python --text-field whole_func_string --total-steps 1 --max-samples 8 --val-samples 2 --max-seq-len 128
+```
+
+- Modal app URL: https://modal.com/apps/suryavanshi/main/ap-d4bJtOyPjOp27bN5gt2hjZ
+- Result: `code_search_net` / `python` loads and trains through the same path.
+
+Performance report: `reports/2026-05-05-modal-baseline.md`.
+
+Colab notebook: `notebooks/colab_train.ipynb`.
+
 ## Local Verification
 Passed:
 

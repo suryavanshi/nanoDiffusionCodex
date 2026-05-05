@@ -25,7 +25,7 @@ def main() -> None:
     from nano_diffusion.data.dataset import TokenManifestDataset, collate_token_batch
     from nano_diffusion.diffusion.discrete import MaskingDiffusion
     from nano_diffusion.inference.sampler import load_model
-    from nano_diffusion.training.loop import evaluate
+    from nano_diffusion.training.loop import evaluate_metrics
 
     model, config, tokenizer, device = load_model(args.checkpoint, args.device)
     manifest = args.manifest or config["data"]["val_manifest"]
@@ -38,8 +38,10 @@ def main() -> None:
         schedule=str(config["diffusion"].get("schedule", "cosine")),
         never_mask_token_ids=(tokenizer.bos_token_id, tokenizer.eos_token_id),
     )
-    val_loss = evaluate(model, loader, diffusion, device)
-    print(json.dumps({"val_loss": val_loss, "manifest": manifest}, indent=2))
+    metrics = evaluate_metrics(model, loader, diffusion, device)
+    metrics["manifest"] = manifest
+    metrics["metric_name"] = "masked_token_perplexity"
+    print(json.dumps(metrics, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
