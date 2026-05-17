@@ -11,17 +11,20 @@ Build a **nano-scale diffusion model for code generation/editing** with fast ite
 
 ## Core Technical Strategy
 1. **Representation**
-   - Start with text-level tokenization (BPE/SentencePiece) for simplicity and reproducibility.
+   - Current implementation uses a Hugging Face-trained BPE tokenizer with 16,384 tokens.
+   - Keep byte-level tokenization available for smoke tests and debugging.
    - Add optional AST-aware auxiliary objectives later.
 
 2. **Diffusion Objective for Discrete Tokens**
-   - Implement a discrete diffusion/noising process over token sequences.
-   - Compare a few schedules (linear/cosine/custom) and timestep parameterizations.
-   - Train with denoising objective conditioned on prompt/context.
+   - Current implementation uses masked discrete diffusion over token sequences.
+   - Fill-in-the-middle conditioning is implemented with prefix/suffix visible and only the middle span denoised.
+   - Evaluation reports token-weighted masked-token loss and perplexity.
+   - Near-term fix: make training gradient accumulation token-weighted as well; it currently averages microbatch losses equally.
 
 3. **Backbone Architecture**
-   - Decoder-style Transformer with diffusion timestep conditioning.
-   - Parameter-efficient baseline with modern norms/activations and rotary embeddings.
+   - Current baseline is a bidirectional `TransformerEncoder` denoiser with token, learned position, and timestep embeddings.
+   - 100M-parameter config: 12 layers, hidden size 768, 12 heads, 2,048 context, tied output head.
+   - The architecture is functional but basic; after loss accounting is fixed, consider RoPE, RMSNorm, SwiGLU, and FlashAttention.
    - Keep modularity for future hybrid recurrent/state-space blocks.
 
 4. **Sampling/Decoding**
@@ -37,18 +40,28 @@ Build a **nano-scale diffusion model for code generation/editing** with fast ite
 - Add data pipeline skeleton and tokenizer tooling.
 - Create baseline training/evaluation CLI entrypoints.
 
-### Phase 1 — MVP Diffusion Training Loop (Current)
-- Use deterministic byte-level tokenization first; this avoids tokenizer training and keeps Modal/local preprocessing identical.
-- Implement masked discrete diffusion: sample a timestep, mask code bytes according to a linear/cosine schedule, and train the model to reconstruct the original tokens at masked positions.
-- Implement a small bidirectional Transformer denoiser with token, position, and timestep embeddings.
-- Prepare a tiny Hugging Face code slice via streaming download into reproducible JSONL token manifests.
-- Validate end-to-end train/eval/infer loop locally or on Modal before scaling model size.
+### Phase 1 — MVP Diffusion Training Loop (Complete)
+- Implemented byte-level and BPE tokenization paths.
+- Implemented masked discrete diffusion: sample a timestep, mask eligible code tokens according to a cosine schedule, and train the model to reconstruct masked positions.
+- Implemented fill-in-the-middle manifests and denoise masks.
+- Implemented a bidirectional Transformer denoiser with token, position, and timestep embeddings.
+- Prepared Hugging Face code slices via streaming download into reproducible JSONL token manifests.
+- Validated end-to-end train/eval/infer loop on Modal, including a 100M-parameter A100 run.
+
+Latest completed A100 run:
+- Experiment: `bpe-fim-100m-a100-50k-10k-bg`
+- Data: 50k train examples, 1k validation examples
+- Model: 100,407,552 parameters, 2,048 context, 16,384 BPE vocab
+- Training: 10k optimizer updates, effective batch 16
+- Final validation loss: 7.153740362882263
+- Final masked-token perplexity: 1278.8804974902407
 
 ### Phase 2 — Quality + Stability (Weeks 5–8)
-- Add improved schedules, loss weighting, and curriculum.
-- Expand dataset quality filters and dedup.
-- Add benchmark harness (HumanEval-like, MBPP-like).
-- Introduce checkpoint averaging and robust logging.
+- Fix token-weighted training loss under gradient accumulation so optimization matches validation accounting.
+- Benchmark larger A100 microbatches: `batch_size=2, grad_accum=8` and `batch_size=4, grad_accum=4`.
+- Expand dataset quality filters and dedup, then scale from 50k to 200k+ examples.
+- Add syntax-validity checks before HumanEval/MBPP-style benchmarks.
+- Introduce checkpoint averaging and richer run reports.
 
 ### Phase 3 — Inference Optimization (Weeks 9–12)
 - Optimize sampler implementation and caching.
@@ -75,10 +88,12 @@ Build a **nano-scale diffusion model for code generation/editing** with fast ite
 ## Risks and Mitigations
 - **Diffusion decoding cost too high:** invest early in step-reduction and distillation.
 - **Small model underfitting:** curriculum + stronger data curation + scaling experiments.
+- **Misleading training loss:** make training and validation both token-weighted, especially when FIM denoise spans vary in length.
+- **A100 memory underuse:** increase per-device microbatch size before increasing model size.
 - **Evaluation drift:** frozen benchmark versions and reproducible harness.
 
 ## Deliverables
-- Reproducible training pipeline.
-- Baseline nano diffusion checkpoints.
-- Benchmark report with quality/latency tradeoffs.
+- Reproducible training pipeline. Complete for MVP.
+- Baseline nano diffusion checkpoints. Local A100 artifacts exist under `checkpoints/bpe-fim-100m-a100-50k-10k-bg/`.
+- Benchmark report with quality/latency tradeoffs. In progress; A100 masked-token perplexity report exists, HumanEval should wait until generated Python is parseable.
 - Inference package and docs for local experimentation.

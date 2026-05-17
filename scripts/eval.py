@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--max-batches", type=int, default=None)
     parser.add_argument("--device", default="auto")
     args = parser.parse_args()
 
@@ -29,6 +30,7 @@ def main() -> None:
 
     model, config, tokenizer, device = load_model(args.checkpoint, args.device)
     manifest = args.manifest or config["data"]["val_manifest"]
+    max_batches = args.max_batches or int(config.get("training", {}).get("eval_batches", 8))
     dataset = TokenManifestDataset(manifest)
     loader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_token_batch)
     diffusion = MaskingDiffusion(
@@ -38,8 +40,9 @@ def main() -> None:
         schedule=str(config["diffusion"].get("schedule", "cosine")),
         never_mask_token_ids=(tokenizer.bos_token_id, tokenizer.eos_token_id),
     )
-    metrics = evaluate_metrics(model, loader, diffusion, device)
+    metrics = evaluate_metrics(model, loader, diffusion, device, max_batches=max_batches)
     metrics["manifest"] = manifest
+    metrics["max_batches"] = max_batches
     metrics["metric_name"] = "masked_token_perplexity"
     print(json.dumps(metrics, indent=2, sort_keys=True))
 

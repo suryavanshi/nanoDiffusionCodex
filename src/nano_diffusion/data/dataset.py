@@ -30,6 +30,10 @@ class TokenManifestDataset(Dataset):
         return {
             "input_ids": torch.tensor(row["input_ids"], dtype=torch.long),
             "attention_mask": torch.tensor(row["attention_mask"], dtype=torch.bool),
+            "denoise_mask": torch.tensor(
+                row.get("denoise_mask", row["attention_mask"]),
+                dtype=torch.bool,
+            ),
         }
 
 
@@ -37,4 +41,5 @@ def collate_token_batch(batch: list[dict[str, torch.Tensor]]) -> dict[str, torch
     return {
         "input_ids": torch.stack([item["input_ids"] for item in batch], dim=0),
         "attention_mask": torch.stack([item["attention_mask"] for item in batch], dim=0),
+        "denoise_mask": torch.stack([item["denoise_mask"] for item in batch], dim=0),
     }

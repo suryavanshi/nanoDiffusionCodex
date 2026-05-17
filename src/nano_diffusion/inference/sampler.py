@@ -10,15 +10,15 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("Install torch to use nano_diffusion.inference.sampler") from exc
 
-from nano_diffusion.data.tokenizer import ByteTokenizer
+from nano_diffusion.data.tokenizer import CodeTokenizer, load_tokenizer_from_config
 from nano_diffusion.training.loop import build_model, resolve_device
 
 
-def load_model(checkpoint_path: str, device_name: str = "auto") -> tuple[torch.nn.Module, dict[str, Any], ByteTokenizer, torch.device]:
-    tokenizer = ByteTokenizer()
+def load_model(checkpoint_path: str, device_name: str = "auto") -> tuple[torch.nn.Module, dict[str, Any], CodeTokenizer, torch.device]:
     device = resolve_device(device_name)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     config = checkpoint["config"]
+    tokenizer = load_tokenizer_from_config(config)
     model = build_model(config, tokenizer).to(device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
@@ -37,8 +37,8 @@ def sample_completion(
     max_seq_len = int(config["model"]["max_seq_len"])
     steps = steps or int(config["diffusion"]["timesteps"])
 
-    prompt_ids, _ = tokenizer.encode(prompt, max_seq_len)
-    prompt_len = min(len(prompt.encode("utf-8", errors="replace")) + 1, max_seq_len - 1)
+    prompt_ids, prompt_attention = tokenizer.encode(prompt, max_seq_len)
+    prompt_len = max(1, sum(prompt_attention) - 1)
     generation_end = min(max_seq_len - 1, prompt_len + new_tokens)
 
     ids = torch.full((1, max_seq_len), tokenizer.pad_token_id, dtype=torch.long, device=device)

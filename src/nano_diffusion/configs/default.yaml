@@ -3,11 +3,11 @@ project:
   seed: 42
 
 model:
-  vocab_size: 260
-  dim: 128
-  layers: 4
-  heads: 4
-  max_seq_len: 256
+  vocab_size: 16384
+  dim: 768
+  layers: 12
+  heads: 12
+  max_seq_len: 2048
   dropout: 0.1
 
 diffusion:
@@ -15,16 +15,25 @@ diffusion:
   schedule: cosine
 
 training:
-  batch_size: 8
-  learning_rate: 3.0e-4
+  batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 1.0e-4
+  min_learning_rate: 1.0e-5
+  lr_schedule: cosine
+  warmup_steps: 100
   weight_decay: 0.01
   grad_clip: 1.0
   total_steps: 200
   eval_interval: 50
+  eval_batches: 64
   save_interval: 100
-  output_dir: runs/nano-diffusion-byte
+  output_dir: runs/nano-diffusion-bpe-fim
   device: auto
 
 data:
   train_manifest: data/processed/train.jsonl
   val_manifest: data/processed/val.jsonl
+
+tokenizer:
+  type: bpe
+  path: data/processed/tokenizer.json

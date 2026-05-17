@@ -17,7 +17,7 @@ except ImportError as exc:  # pragma: no cover
     raise ImportError("Install torch and tqdm to use nano_diffusion.training.loop") from exc
 
 from nano_diffusion.data.dataset import TokenManifestDataset, collate_token_batch
-from nano_diffusion.data.tokenizer import ByteTokenizer
+from nano_diffusion.data.tokenizer import CodeTokenizer, load_tokenizer_from_config
 from nano_diffusion.diffusion.discrete import MaskingDiffusion
 from nano_diffusion.models.transformer import TinyTransformerDenoiser
 
@@ -35,12 +35,12 @@ def resolve_device(name: str) -> torch.device:
     return torch.device(name)
 
 
-def build_model(config: dict[str, Any], tokenizer: ByteTokenizer) -> TinyTransformerDenoiser:
+def build_model(config: dict[str, Any], tokenizer: CodeTokenizer) -> TinyTransformerDenoiser:
     model_cfg = config["model"]
     diffusion_cfg = config["diffusion"]
     vocab_size = int(model_cfg.get("vocab_size", tokenizer.vocab_size))
-    if vocab_size != tokenizer.vocab_size:
-        raise ValueError(f"ByteTokenizer requires vocab_size={tokenizer.vocab_size}, got {vocab_size}")
+    if vocab_size < tokenizer.vocab_size:
+        raise ValueError(f"Config vocab_size={vocab_size} is smaller than tokenizer vocab_size={tokenizer.vocab_size}")
     return TinyTransformerDenoiser(
         vocab_size=vocab_size,
         dim=int(model_cfg["dim"]),
@@ -63,6 +63,34 @@ def loss_to_perplexity(loss: float) -> float:
         return float(math.exp(min(loss, 50.0)))
     except OverflowError:
         return float("inf")
+
+
+def build_lr_scheduler(
+    optimizer: torch.optim.Optimizer,
+    total_steps: int,
+    warmup_steps: int,
+    base_lr: float,
+    min_lr: float,
+    schedule: str,
+) -> torch.optim.lr_scheduler.LambdaLR | None:
+    if schedule == "constant":
+        return None
+    if schedule != "cosine":
+        raise ValueError(f"Unknown lr_schedule: {schedule}")
+
+    warmup_steps = max(0, warmup_steps)
+    total_steps = max(1, total_steps)
+    min_ratio = min_lr / base_lr if base_lr > 0.0 else 0.0
+
+    def lr_lambda(step_index: int) -> float:
+        if warmup_steps > 0 and step_index < warmup_steps:
+            return max(min_ratio, float(step_index + 1) / float(warmup_steps))
+        decay_steps = max(1, total_steps - warmup_steps)
+        progress = min(1.0, max(0.0, float(step_index - warmup_steps) / float(decay_steps)))
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_ratio + (1.0 - min_ratio) * cosine
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
 @torch.no_grad()
@@ -93,8 +121,9 @@ def evaluate_metrics(
             break
         input_ids = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
+        denoise_mask = batch["denoise_mask"].to(device)
         t = diffusion.sample_timesteps(input_ids.size(0), device)
-        noisy, mask_positions = diffusion.q_sample(input_ids, attention_mask, t)
+        noisy, mask_positions = diffusion.q_sample(input_ids, attention_mask, t, denoise_mask=denoise_mask)
         logits = model(noisy, t, attention_mask)
         loss = masked_ce_loss(logits, input_ids, mask_positions)
         batch_masked_tokens = int(mask_positions.sum().item())
@@ -113,7 +142,7 @@ def evaluate_metrics(
 
 def train(config: dict[str, Any]) -> dict[str, Any]:
     seed_everything(int(config["project"].get("seed", 42)))
-    tokenizer = ByteTokenizer()
+    tokenizer = load_tokenizer_from_config(config)
     device = resolve_device(str(config["training"].get("device", "auto")))
 
     train_dataset = TokenManifestDataset(config["data"]["train_manifest"])
@@ -148,10 +177,21 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
     )
 
     total_steps = int(config["training"]["total_steps"])
+    gradient_accumulation_steps = max(1, int(config["training"].get("gradient_accumulation_steps", 1)))
     eval_interval = int(config["training"].get("eval_interval", 100))
+    eval_batches = int(config["training"].get("eval_batches", 8))
     save_interval = int(config["training"].get("save_interval", 500))
     output_dir = Path(config["training"].get("output_dir", "runs/nano-diffusion"))
     output_dir.mkdir(parents=True, exist_ok=True)
+    learning_rate = float(config["training"]["learning_rate"])
+    lr_scheduler = build_lr_scheduler(
+        optimizer,
+        total_steps=total_steps,
+        warmup_steps=int(config["training"].get("warmup_steps", 0)),
+        base_lr=learning_rate,
+        min_lr=float(config["training"].get("min_learning_rate", learning_rate)),
+        schedule=str(config["training"].get("lr_schedule", "constant")),
+    )
 
     metrics_path = output_dir / "metrics.jsonl"
     best_val = float("inf")
@@ -159,32 +199,50 @@ def train(config: dict[str, Any]) -> dict[str, Any]:
     train_iter = iter(train_loader)
     progress = tqdm(total=total_steps, desc="train", leave=False)
     while step < total_steps:
-        try:
-            batch = next(train_iter)
-        except StopIteration:
-            train_iter = iter(train_loader)
-            batch = next(train_iter)
-
         model.train()
-        input_ids = batch["input_ids"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
-        t = diffusion.sample_timesteps(input_ids.size(0), device)
-        noisy, mask_positions = diffusion.q_sample(input_ids, attention_mask, t)
-        logits = model(noisy, t, attention_mask)
-        loss = masked_ce_loss(logits, input_ids, mask_positions)
-
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        accumulated_loss = 0.0
+        accumulated_masked_tokens = 0
+        for _ in range(gradient_accumulation_steps):
+            try:
+                batch = next(train_iter)
+            except StopIteration:
+                train_iter = iter(train_loader)
+                batch = next(train_iter)
+
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            denoise_mask = batch["denoise_mask"].to(device)
+            t = diffusion.sample_timesteps(input_ids.size(0), device)
+            noisy, mask_positions = diffusion.q_sample(input_ids, attention_mask, t, denoise_mask=denoise_mask)
+            logits = model(noisy, t, attention_mask)
+            loss = masked_ce_loss(logits, input_ids, mask_positions)
+            (loss / gradient_accumulation_steps).backward()
+            accumulated_loss += float(loss.item())
+            accumulated_masked_tokens += int(mask_positions.sum().item())
+
         torch.nn.utils.clip_grad_norm_(model.parameters(), float(config["training"].get("grad_clip", 1.0)))
+        step_lr = float(optimizer.param_groups[0]["lr"])
         optimizer.step()
+        if lr_scheduler is not None:
+            lr_scheduler.step()
 
         step += 1
         progress.update(1)
-        progress.set_postfix(loss=f"{loss.item():.3f}")
+        train_loss = accumulated_loss / gradient_accumulation_steps
+        next_lr = float(optimizer.param_groups[0]["lr"])
+        progress.set_postfix(loss=f"{train_loss:.3f}", lr=f"{step_lr:.2e}")
 
-        record = {"step": step, "train_loss": float(loss.item())}
+        record = {
+            "step": step,
+            "train_loss": train_loss,
+            "learning_rate": step_lr,
+            "next_learning_rate": next_lr,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "train_masked_tokens": accumulated_masked_tokens,
+        }
         if step % eval_interval == 0 or step == total_steps:
-            val_metrics = evaluate_metrics(model, val_loader, diffusion, device)
+            val_metrics = evaluate_metrics(model, val_loader, diffusion, device, max_batches=eval_batches)
             val_loss = val_metrics["loss"]
             record["val_loss"] = val_loss
             record["val_perplexity"] = val_metrics["perplexity"]

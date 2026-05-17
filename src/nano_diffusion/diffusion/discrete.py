@@ -43,9 +43,12 @@ class MaskingDiffusion:
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         t: torch.Tensor,
+        denoise_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         probs = self.mask_probability(t).view(-1, 1)
         can_mask = attention_mask & (input_ids != self.pad_token_id)
+        if denoise_mask is not None:
+            can_mask = can_mask & denoise_mask.bool()
         for token_id in self.never_mask_token_ids:
             can_mask = can_mask & (input_ids != token_id)
         random_values = torch.rand(input_ids.shape, device=input_ids.device)

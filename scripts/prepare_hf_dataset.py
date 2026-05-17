@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from nano_diffusion.data.manifest import extract_text, write_token_manifest
-from nano_diffusion.data.tokenizer import ByteTokenizer
+from nano_diffusion.data.tokenizer import ByteTokenizer, train_bpe_tokenizer
 
 
 DATASET_PRESETS = {
@@ -47,6 +47,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-seq-len", type=int, default=256, help="Tokenized sequence length")
     parser.add_argument("--min-chars", type=int, default=32, help="Minimum raw text length")
     parser.add_argument("--output-dir", default="data/processed", help="Output directory")
+    parser.add_argument("--tokenizer", choices=["byte", "bpe"], default="bpe", help="Tokenizer type")
+    parser.add_argument("--vocab-size", type=int, default=16384, help="BPE vocabulary size")
+    parser.add_argument("--tokenizer-path", default=None, help="Path to read/write BPE tokenizer JSON")
+    parser.add_argument("--fim-rate", type=float, default=0.5, help="Fraction of samples formatted as fill-in-the-middle")
     parser.add_argument("--streaming", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -90,8 +94,16 @@ def main() -> None:
     if len(rows) < total:
         print(f"[prepare] warning: requested {total} rows, found {len(rows)} usable rows")
 
-    tokenizer = ByteTokenizer()
     output_dir = Path(args.output_dir)
+    tokenizer_path = Path(args.tokenizer_path) if args.tokenizer_path else output_dir / "tokenizer.json"
+    if args.tokenizer == "bpe":
+        tokenizer = train_bpe_tokenizer(
+            (extract_text(row, text_field) or "" for row in rows),
+            tokenizer_path,
+            vocab_size=args.vocab_size,
+        )
+    else:
+        tokenizer = ByteTokenizer()
     train_path = output_dir / "train.jsonl"
     val_path = output_dir / "val.jsonl"
     val_rows = rows[: args.val_samples]
@@ -104,6 +116,7 @@ def main() -> None:
         args.max_seq_len,
         text_field=text_field,
         min_chars=args.min_chars,
+        fim_rate=args.fim_rate,
     )
     val_count = write_token_manifest(
         val_rows,
@@ -112,9 +125,11 @@ def main() -> None:
         args.max_seq_len,
         text_field=text_field,
         min_chars=args.min_chars,
+        fim_rate=args.fim_rate,
     )
 
     print(f"[prepare] preset={args.preset} dataset={dataset} config={dataset_config} split={split} text_field={text_field}")
+    print(f"[prepare] tokenizer={args.tokenizer} vocab_size={tokenizer.vocab_size} path={tokenizer_path if args.tokenizer == 'bpe' else 'byte'} fim_rate={args.fim_rate}")
     print(f"[prepare] wrote train={train_count} -> {train_path}")
     print(f"[prepare] wrote val={val_count} -> {val_path}")
 
